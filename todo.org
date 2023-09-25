@@ -1,0 +1,11 @@
+* DONE When key is held down, make it repeat
+What I have tried so far is not working ( it has to do with state between keyboard checks)
+* DONE Change the font
+* DONE Show cursor
+* TODO Write more than just letters
+* TODO Put cursor in multi-lines
+* TODO Line wrapping
+* TODO make structs and functions
+* TODO make hierarchical headers
+* TODO toggle todo/done on headers
+* TODO save state to file
