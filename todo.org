@@ -2,10 +2,13 @@
 What I have tried so far is not working ( it has to do with state between keyboard checks)
 * DONE Change the font
 * DONE Show cursor
-* TODO Write more than just letters
-* TODO Put cursor in multi-lines
-* TODO Line wrapping
+* DONE Write more than just letters
+* DONE Put cursor in multi-lines
 * TODO make structs and functions
+* TODO Improve alg for repeating key
+* TODO write in the middle of line
+Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
+* TODO Line wrapping
 * TODO make hierarchical headers
 * TODO toggle todo/done on headers
 * TODO save state to file
