@@ -11,7 +11,7 @@ import "vendor:stb/src"
 
 cursor_rect := rl.Rectangle{0, 0, 50, 20}
 
-TICK_DURATION :: 30
+TICK_DURATION :: 15
 
 Editor :: struct {
     cursor_position:      int,
