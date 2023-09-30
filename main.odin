@@ -4,25 +4,28 @@ import "core:fmt"
 import "core:strings"
 import "core:runtime"
 import "core:mem"
+import "core:slice"
 import rl "vendor:raylib"
 import mu "vendor:microui"
 import mu_rl "microui_raylib"
 import "vendor:stb/src"
 
-cursor_rect := rl.Rectangle{0, 0, 50, 20}
-
 TICK_DURATION :: 15
 
+Line :: struct {
+    start: int,
+    end:   int,
+}
+
 Editor :: struct {
-    cursor_position:      int,
-    prev_key:             rl.KeyboardKey,
-    tick:                 int,
-    builder:              strings.Builder,
-    cursor_position_2d:   [2]int,
-    position_of_newlines: [dynamic]int,
-    font:                 rl.Font,
-    text_measure:         rl.Vector2,
-    font_size:            int,
+    cursor_position: int,
+    prev_key:        rl.KeyboardKey,
+    tick:            int,
+    builder:         strings.Builder,
+    lines:           [dynamic]Line,
+    font:            rl.Font,
+    text_measure:    rl.Vector2,
+    font_size:       int,
 }
 
 init_editor :: proc(using editor: ^Editor, font_size_to_use: int) -> mem.Allocator_Error {
@@ -31,7 +34,7 @@ init_editor :: proc(using editor: ^Editor, font_size_to_use: int) -> mem.Allocat
     text_measure = rl.MeasureTextEx(font, "t", auto_cast font_size, 0)
     tick = TICK_DURATION
     builder = strings.builder_make() or_return
-    position_of_newlines = make([dynamic]int) or_return
+    lines = make([dynamic]Line) or_return
     return .None
 }
 
@@ -57,12 +60,6 @@ main :: proc() {
         mu.begin(ctx)
         defer mu.end(ctx)
 
-        {     // count new lines in builder
-            clear(&position_of_newlines)
-            for char, id in strings.to_string(builder) {
-                if char == '\n' do append(&position_of_newlines, id)
-            }
-        }
 
         key := rl.GetKeyPressed()
         {     // Update key and reset tick
@@ -70,82 +67,108 @@ main :: proc() {
             if key != .KEY_NULL do tick = TICK_DURATION
         }
 
+	execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
+	    switch {
+	    case key == .BACKSPACE:
+		remove_byte(editor)
+		cursor_position -= 1
+		cursor_position = max(0, cursor_position)
 
-        //TODO: (joe) Might need to rework this so that we can do keyboard shortcuts
-        command: switch {
-        case key == .BACKSPACE:
-	    remove_byte(&editor)
-            cursor_position -= 1
-            cursor_position = max(0, cursor_position)
+            case key == .ENTER:
+		write_byte(editor, '\n')
+		cursor_position += 1
+		cursor_position = min(cursor_position, len(strings.to_string(builder)))
 
-        case key == .ENTER:
-	    write_byte(&editor, '\n')
-            cursor_position += 1
-	    cursor_position = min(cursor_position, len(strings.to_string(builder)))
+            case key == .RIGHT:
+		cursor_position += 1
+		cursor_position = min(cursor_position, len(strings.to_string(builder)))
 
-        case key == .RIGHT:
-            cursor_position += 1
-            cursor_position = min(cursor_position, len(strings.to_string(builder)))
+            case key == .LEFT:
+		cursor_position -= 1
+		cursor_position = max(0, cursor_position)
 
-        case key == .LEFT:
-            cursor_position -= 1
-            cursor_position = max(0, cursor_position)
+            case key == .UP:
+		line_id := get_visual_cursor_line_id(editor^)
+		if line_id == 0 do return
 
-        case key == .KEY_NULL:
-            if IsKeyDown(prev_key) {
-                if tick > 0 do tick -= 1
-                else {
-                    switch {
-                    case key == .ENTER:
-			write_byte(&editor, '\n')
-			cursor_position += 1
-			cursor_position = min(cursor_position, len(strings.to_string(builder)))
+		// current line is REAL
+		if line_id < len(lines) {
+                    assert(len(lines) > 1)
+                    current_line := lines[line_id]
+                    offset_current_line := cursor_position - current_line.start
+                    new_line := lines[line_id - 1]
 
-                    case is_printable(prev_key):
-                        byte_to_write := determine_printable_byte(key)
-			write_byte(&editor, byte_to_write)
-                        cursor_position += 1
-                        cursor_position = min(cursor_position, len(strings.to_string(builder)))
+                    length_newline := new_line.end - new_line.start
+                    if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
+                    else do cursor_position = new_line.end
+		} else {
+                    // no characters in current line
+                    cursor_position = slice.last(lines[:]).start
+		}
 
-                    case prev_key == .BACKSPACE:
-                        remove_byte(&editor)
-                        cursor_position -= 1
-                        cursor_position = max(0, cursor_position)
+	    case key == .DOWN:
+		line_id := get_visual_cursor_line_id(editor^)
+		// VISUAL line              Real line
+		if line_id == len(lines) || line_id == len(lines) - 1 do return
 
-                    case prev_key == .RIGHT:
-                        cursor_position += 1
-                        cursor_position = min(cursor_position, len(strings.to_string(builder)))
+		current_line := lines[line_id]
+		offset_current_line := cursor_position - current_line.start
+		new_line := lines[line_id + 1]
+		
+		length_newline := new_line.end - new_line.start
+		if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
+                else do cursor_position = new_line.end
+		
+	    case is_printable(key):
+		byte_to_write := determine_printable_byte(key)
+		write_byte(editor, byte_to_write)
+		cursor_position += 1
+		cursor_position = min(cursor_position, len(strings.to_string(builder)))
+	    }
+	}
 
-                    case prev_key == .LEFT:
-                        cursor_position -= 1
-                        cursor_position = max(0, cursor_position)
+	if key != .KEY_NULL do execute_command(&editor, key)
+	else {
+	    if IsKeyDown(prev_key) {
+		if tick > 0 do tick -= 1
+                else do execute_command(&editor, prev_key)
+	    }
+	}
+
+        {     // determine lines in builder
+            clear(&lines)
+            for char, id in strings.to_string(builder) {
+                if char == '\n' || id == strings.builder_len(builder) - 1 {
+                    if len(lines) == 0 {
+                        //NOTE: First line doesn't need to end with a '\n'
+                        append(&lines, Line{0, id})
+                    } else {
+                        line: Line
+                        line.start = slice.last(lines[:]).end + 1
+                        line.end = id
+                        append(&lines, line)
                     }
                 }
             }
-
-        case is_printable(key):
-            byte_to_write := determine_printable_byte(key)
-	    write_byte(&editor, byte_to_write)
-            cursor_position += 1
-	    cursor_position = min(cursor_position, len(strings.to_string(builder)))
         }
 
-        nbr_of_lines := 0
-	// when on the first line, x_coord = 0
-        line_position := -1
-	
-        for line in position_of_newlines {
-            if cursor_position <= line do break
-            nbr_of_lines += 1
-            line_position = line
-        }
+        cursor_coords : [2]int
+	{
+	    current_line_id := get_visual_cursor_line_id(editor)
+	    ending_of_line := -1
+	    if current_line_id != 0 && len(lines) > 1 do ending_of_line = lines[current_line_id - 1].end
+	    else if cursor_position == len(builder.buf) && current_line_id != 0 do ending_of_line = cursor_position - 1
+
+	    cursor_coords = {cursor_position - ending_of_line - 1, current_line_id}
+	}
+
         str := strings.to_string(builder)
         //TODO: (joe) Separate by newline and draw each line separatly
         DrawTextEx(font, fmt.ctprintf("%v", str), {0, 0}, 20, 0, WHITE)
         DrawRectangleV(
             {
-                auto_cast (cursor_position - line_position - 1) * text_measure.x,
-                (text_measure.y + 8.5) * auto_cast nbr_of_lines,
+                auto_cast (cursor_coords.x) * text_measure.x,
+                (text_measure.y + 8.5) * auto_cast cursor_coords.y,
             },
             {0.5 * text_measure.x, text_measure.y},
             BLUE,
@@ -172,41 +195,41 @@ determine_printable_byte :: proc(key: rl.KeyboardKey) -> (byte_to_write: byte) {
     assert(is_printable(key))
     switch {
     case is_alpha(key):
-	if !shift_key_down() do byte_to_write = (auto_cast key) + 32 
-	else do byte_to_write = auto_cast key
+        if !shift_key_down() do byte_to_write = (auto_cast key) + 32
+        else do byte_to_write = auto_cast key
     case shift_key_down():
-	switch {
-	case key == .ONE:
-            byte_to_write = 33 
-	case key == .TWO:
+        switch {
+        case key == .ONE:
+            byte_to_write = 33
+        case key == .TWO:
             byte_to_write = 64
-	case key == .THREE:
+        case key == .THREE:
             byte_to_write = 35
-	case key == .FOUR:
+        case key == .FOUR:
             byte_to_write = 36
-	case key == .FIVE:
+        case key == .FIVE:
             byte_to_write = 37
-	case key == .SIX:
+        case key == .SIX:
             byte_to_write = 94
-	case key == .SEVEN:
+        case key == .SEVEN:
             byte_to_write = 38
-	case key == .EIGHT:
+        case key == .EIGHT:
             byte_to_write = 42
-	case key == .NINE:
+        case key == .NINE:
             byte_to_write = 40
-	case key == .ZERO:
+        case key == .ZERO:
             byte_to_write = 41
-	case key == .MINUS:
+        case key == .MINUS:
             byte_to_write = 95
-	case key == .EQUAL:
+        case key == .EQUAL:
             byte_to_write = 43
-	case key == .SLASH:
+        case key == .SLASH:
             byte_to_write = 63
-	case key == .APOSTROPHE:
+        case key == .APOSTROPHE:
             byte_to_write = 34
-	}
-	case:
-	byte_to_write = auto_cast key
+        }
+    case:
+        byte_to_write = auto_cast key
     }
 
     return
@@ -216,9 +239,13 @@ write_byte :: proc(using editor: ^Editor, byte_to_write: byte) {
     length := strings.builder_len(builder)
     capacity := cap(builder.buf)
     if cursor_position != length && length > 0 {
-	strings.write_byte(&builder, 0)
-	mem.copy(&builder.buf[cursor_position + 1], &builder.buf[cursor_position], capacity - cursor_position)
-	builder.buf[cursor_position] = byte_to_write
+        strings.write_byte(&builder, 0)
+        mem.copy(
+            &builder.buf[cursor_position + 1],
+            &builder.buf[cursor_position],
+            capacity - cursor_position,
+        )
+        builder.buf[cursor_position] = byte_to_write
     } else do strings.write_byte(&builder, byte_to_write)
 }
 
@@ -228,8 +255,27 @@ remove_byte :: proc(using editor: ^Editor) {
     capacity := cap(builder.buf)
     if cursor_position == len(builder.buf) do strings.pop_byte(&builder)
     else {
-	mem.copy(&builder.buf[cursor_position - 1], &builder.buf[cursor_position], capacity - cursor_position)
-	d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
-	d.len = max(length - 1, 0)
+        mem.copy(&builder.buf[cursor_position - 1], &builder.buf[cursor_position], capacity - cursor_position)
+        d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
+        d.len = max(length - 1, 0)
     }
+}
+
+get_visual_cursor_line_id :: proc(using editor: Editor) -> int {
+    if len(lines) == 0 do return 0
+
+    current_line_id := 0
+    for line in lines {
+        if cursor_position >= line.start {
+            end_line_byte := builder.buf[line.end]
+            test: int
+            if end_line_byte == '\n' do test = line.end
+            else do test = line.end + 1
+
+            if cursor_position <= test do break
+        }
+        current_line_id += 1
+    }
+
+    return current_line_id
 }

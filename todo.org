@@ -8,6 +8,7 @@ What I have tried so far is not working ( it has to do with state between keyboa
 * DONE write/edit in the middle of line
 Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 * DONE Refactor
+* DONE Move cursor up/down
 * TODO make hierarchical headers
 * TODO toggle todo/done on headers
 * TODO Fold Headers
