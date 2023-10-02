@@ -40,7 +40,7 @@ init_editor :: proc(using editor: ^Editor, font_size_to_use: int) -> mem.Allocat
 
 main :: proc() {
     using rl
-    SetWindowState({.MSAA_4X_HINT, .VSYNC_HINT})
+    SetWindowState({.MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_RESIZABLE})
     SetTargetFPS(60)
     InitWindow(800, 800, "org-clone")
     defer CloseWindow()
@@ -67,32 +67,44 @@ main :: proc() {
             if key != .KEY_NULL do tick = TICK_DURATION
         }
 
-	execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
-	    switch {
-	    case key == .BACKSPACE:
-		remove_byte(editor)
-		cursor_position -= 1
-		cursor_position = max(0, cursor_position)
+        execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
+            switch {
+            case key == .BACKSPACE:
+                remove_byte(editor)
+                cursor_position -= 1
+                cursor_position = max(0, cursor_position)
 
             case key == .ENTER:
-		write_byte(editor, '\n')
-		cursor_position += 1
-		cursor_position = min(cursor_position, len(strings.to_string(builder)))
+                write_byte(editor, '\n')
+                cursor_position += 1
+                cursor_position = min(cursor_position, len(strings.to_string(builder)))
 
             case key == .RIGHT:
-		cursor_position += 1
-		cursor_position = min(cursor_position, len(strings.to_string(builder)))
+                cursor_position += 1
+                cursor_position = min(cursor_position, len(strings.to_string(builder)))
 
             case key == .LEFT:
-		cursor_position -= 1
-		cursor_position = max(0, cursor_position)
+                cursor_position -= 1
+                cursor_position = max(0, cursor_position)
+
+	    case key == .A && rl.IsKeyDown(.LEFT_CONTROL):
+		line_id := get_visual_cursor_line_id(editor^)
+		cursor_position = lines[line_id].start
+
+	    case key == .E && rl.IsKeyDown(.LEFT_CONTROL):
+		line_id := get_visual_cursor_line_id(editor^)
+		end := lines[line_id].end
+		if builder.buf[end] != '\n' do end += 1
+		cursor_position = end
+
+	    //TODO: implement delete key and deleting words with ctrl + backspace & ctrl + delete
 
             case key == .UP:
-		line_id := get_visual_cursor_line_id(editor^)
-		if line_id == 0 do return
+                line_id := get_visual_cursor_line_id(editor^)
+                if line_id == 0 do return
 
-		// current line is REAL
-		if line_id < len(lines) {
+                // current line is REAL
+                if line_id < len(lines) {
                     assert(len(lines) > 1)
                     current_line := lines[line_id]
                     offset_current_line := cursor_position - current_line.start
@@ -101,39 +113,39 @@ main :: proc() {
                     length_newline := new_line.end - new_line.start
                     if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
                     else do cursor_position = new_line.end
-		} else {
+                } else {
                     // no characters in current line
                     cursor_position = slice.last(lines[:]).start
-		}
+                }
 
-	    case key == .DOWN:
-		line_id := get_visual_cursor_line_id(editor^)
-		// VISUAL line              Real line
-		if line_id == len(lines) || line_id == len(lines) - 1 do return
+            case key == .DOWN:
+                line_id := get_visual_cursor_line_id(editor^)
+                // VISUAL line              Real line
+                if line_id == len(lines) || line_id == len(lines) - 1 do return
 
-		current_line := lines[line_id]
-		offset_current_line := cursor_position - current_line.start
-		new_line := lines[line_id + 1]
-		
-		length_newline := new_line.end - new_line.start
-		if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
+                current_line := lines[line_id]
+                offset_current_line := cursor_position - current_line.start
+                new_line := lines[line_id + 1]
+
+                length_newline: int = new_line.end - new_line.start if builder.buf[new_line.end] == '\n' else new_line.end - new_line.start + 1
+                if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
                 else do cursor_position = new_line.end
-		
-	    case is_printable(key):
-		byte_to_write := determine_printable_byte(key)
-		write_byte(editor, byte_to_write)
-		cursor_position += 1
-		cursor_position = min(cursor_position, len(strings.to_string(builder)))
-	    }
-	}
 
-	if key != .KEY_NULL do execute_command(&editor, key)
-	else {
-	    if IsKeyDown(prev_key) {
-		if tick > 0 do tick -= 1
+            case is_printable(key):
+                byte_to_write := determine_printable_byte(key)
+                write_byte(editor, byte_to_write)
+                cursor_position += 1
+                cursor_position = min(cursor_position, len(strings.to_string(builder)))
+            }
+        }
+
+        if key != .KEY_NULL do execute_command(&editor, key)
+        else {
+            if IsKeyDown(prev_key) {
+                if tick > 0 do tick -= 1
                 else do execute_command(&editor, prev_key)
-	    }
-	}
+            }
+        }
 
         {     // determine lines in builder
             clear(&lines)
@@ -152,15 +164,14 @@ main :: proc() {
             }
         }
 
-        cursor_coords : [2]int
-	{
-	    current_line_id := get_visual_cursor_line_id(editor)
-	    ending_of_line := -1
-	    if current_line_id != 0 && len(lines) > 1 do ending_of_line = lines[current_line_id - 1].end
-	    else if cursor_position == len(builder.buf) && current_line_id != 0 do ending_of_line = cursor_position - 1
-
-	    cursor_coords = {cursor_position - ending_of_line - 1, current_line_id}
-	}
+        cursor_coords: [2]int
+        {
+            current_line_id := get_visual_cursor_line_id(editor)
+            ending_of_line := -1
+            if current_line_id != 0 && len(lines) > 1 do ending_of_line = lines[current_line_id - 1].end
+            else if cursor_position == len(builder.buf) && current_line_id != 0 do ending_of_line = cursor_position - 1
+            cursor_coords = {cursor_position - ending_of_line - 1, current_line_id}
+        }
 
         str := strings.to_string(builder)
         //TODO: (joe) Separate by newline and draw each line separatly
@@ -168,9 +179,9 @@ main :: proc() {
         DrawRectangleV(
             {
                 auto_cast (cursor_coords.x) * text_measure.x,
-                (text_measure.y + 8.5) * auto_cast cursor_coords.y,
+                (text_measure.y + 10) * auto_cast cursor_coords.y,
             },
-            {0.5 * text_measure.x, text_measure.y},
+            {0.5 * text_measure.x, text_measure.y - 4},
             BLUE,
         )
     }
