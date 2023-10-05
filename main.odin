@@ -5,6 +5,7 @@ import "core:strings"
 import "core:runtime"
 import "core:mem"
 import "core:slice"
+import "core:os"
 import rl "vendor:raylib"
 import mu "vendor:microui"
 import mu_rl "microui_raylib"
@@ -70,7 +71,7 @@ main :: proc() {
         execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             switch {
             case key == .BACKSPACE:
-                remove_byte(editor)
+                remove_back_byte(editor)
                 cursor_position -= 1
                 cursor_position = max(0, cursor_position)
 
@@ -87,6 +88,10 @@ main :: proc() {
                 cursor_position -= 1
                 cursor_position = max(0, cursor_position)
 
+	    case (key == .D && rl.IsKeyDown(.LEFT_CONTROL)) || key == .DELETE:
+		remove_forward_byte(editor)
+		// no cursor movement with the delete key
+
 	    case key == .A && rl.IsKeyDown(.LEFT_CONTROL):
 		line_id := get_visual_cursor_line_id(editor^)
 		cursor_position = lines[line_id].start
@@ -96,6 +101,22 @@ main :: proc() {
 		end := lines[line_id].end
 		if builder.buf[end] != '\n' do end += 1
 		cursor_position = end
+
+		//TODO: have a menu to open files and a save as option
+	    case key == .S && rl.IsKeyDown(.LEFT_CONTROL) && rl.IsKeyDown(.LEFT_SHIFT):
+		file_name := "dump.txt"
+		fd, err := os.open(file_name,os.O_CREATE)
+		if err != os.ERROR_NONE do panic("failed to save file")
+		defer os.close(fd)
+		_, err1 := os.write_string(fd, strings.to_string(builder))
+		if err1 != os.ERROR_NONE do panic("failed to write to file")
+
+	    case rl.IsKeyDown(.LEFT_CONTROL) && key == .O:
+		delete(builder.buf)
+		data, ok := os.read_entire_file_from_filename("dump.txt")
+		defer delete(data)
+		data_dynamic, ok1 := slice.to_dynamic(data)
+		builder.buf = data_dynamic
 
 	    //TODO: implement delete key and deleting words with ctrl + backspace & ctrl + delete
 
@@ -179,7 +200,7 @@ main :: proc() {
         DrawRectangleV(
             {
                 auto_cast (cursor_coords.x) * text_measure.x,
-                (text_measure.y + 10) * auto_cast cursor_coords.y,
+                1 + (text_measure.y + 10) * auto_cast cursor_coords.y,
             },
             {0.5 * text_measure.x, text_measure.y - 4},
             BLUE,
@@ -260,7 +281,7 @@ write_byte :: proc(using editor: ^Editor, byte_to_write: byte) {
     } else do strings.write_byte(&builder, byte_to_write)
 }
 
-remove_byte :: proc(using editor: ^Editor) {
+remove_back_byte :: proc(using editor: ^Editor) {
     if cursor_position == 0 do return
     length := len(builder.buf)
     capacity := cap(builder.buf)
@@ -270,6 +291,15 @@ remove_byte :: proc(using editor: ^Editor) {
         d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
         d.len = max(length - 1, 0)
     }
+}
+
+remove_forward_byte :: proc(using editor: ^Editor) {
+    if cursor_position >= len(builder.buf) - 1 do return
+    length := len(builder.buf)
+    capacity := cap(builder.buf)
+
+    mem.copy(&builder.buf[cursor_position], &builder.buf[cursor_position + 1], capacity - (cursor_position + 1))
+    
 }
 
 get_visual_cursor_line_id :: proc(using editor: Editor) -> int {
