@@ -29,6 +29,22 @@ Editor :: struct {
     font_size:       int,
 }
 
+Header :: struct {
+    state: enum {
+	todo,
+	done,
+	waiting,
+    },
+    parent_header: ^Header,
+    children_headers: [dynamic]^Header,
+    text: strings.Builder,
+    tags: enum {
+	A,
+	B,
+	C,
+    },
+}
+
 init_editor :: proc(using editor: ^Editor, font_size_to_use: int) -> mem.Allocator_Error {
     font = rl.LoadFont("FiraCode-Regular.ttf")
     font_size = font_size_to_use
@@ -71,7 +87,7 @@ main :: proc() {
         execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             switch {
             case key == .BACKSPACE:
-                remove_back_byte(editor)
+                remove_back_byte_at(editor, cursor_position)
                 cursor_position -= 1
                 cursor_position = max(0, cursor_position)
 
@@ -88,37 +104,77 @@ main :: proc() {
                 cursor_position -= 1
                 cursor_position = max(0, cursor_position)
 
-	    case (key == .D && rl.IsKeyDown(.LEFT_CONTROL)) || key == .DELETE:
-		remove_forward_byte(editor)
-		// no cursor movement with the delete key
+            case (key == .D && rl.IsKeyDown(.LEFT_CONTROL)) || key == .DELETE:
+                remove_forward_byte_at(editor, cursor_position)
+            // no cursor movement with the delete key
 
-	    case key == .A && rl.IsKeyDown(.LEFT_CONTROL):
-		line_id := get_visual_cursor_line_id(editor^)
-		cursor_position = lines[line_id].start
+            case key == .W && rl.IsKeyDown(.LEFT_CONTROL):
+                line_id := get_visual_cursor_line_id(editor^)
+                end_line_id := len(lines) - 1 if len(lines) > 1 else -1
 
-	    case key == .E && rl.IsKeyDown(.LEFT_CONTROL):
-		line_id := get_visual_cursor_line_id(editor^)
-		end := lines[line_id].end
-		if builder.buf[end] != '\n' do end += 1
-		cursor_position = end
+                end := lines[line_id].end
+                start := lines[line_id].start
+                //TODO: refactor a bit (I repeat myself a bit too much)
+                if line_id != 0 && line_id != end_line_id {
+                    cursor_position = start
+                    length := end - start + 1
+                    for _ in 0 ..< length {
+                        remove_forward_byte_at(editor, cursor_position)
+                    }
+                } else if line_id == 0 {
+                    if len(lines) == 1 {
+                        clear(&builder.buf)
+                        cursor_position = 0
+                    } else {
+                        length := end - start + 1
+                        cursor_position = 0
+                        for _ in 0 ..< length {
+                            remove_forward_byte_at(editor, cursor_position)
+                        }
+                    }
+                } else if line_id == end_line_id {
+                    cursor_position = start
+                    length := end - start
+                    for _ in 0 ..< length {
+                        remove_forward_byte_at(editor, cursor_position)
+                    }
+                } else do panic("can't be here!!!")
 
-		//TODO: have a menu to open files and a save as option
-	    case key == .S && rl.IsKeyDown(.LEFT_CONTROL) && rl.IsKeyDown(.LEFT_SHIFT):
-		file_name := "dump.txt"
-		fd, err := os.open(file_name,os.O_CREATE)
-		if err != os.ERROR_NONE do panic("failed to save file")
-		defer os.close(fd)
-		_, err1 := os.write_string(fd, strings.to_string(builder))
-		if err1 != os.ERROR_NONE do panic("failed to write to file")
+            case key == .K && rl.IsKeyDown(.LEFT_CONTROL):
+                line_id := get_visual_cursor_line_id(editor^)
+                using line := lines[line_id]
 
-	    case rl.IsKeyDown(.LEFT_CONTROL) && key == .O:
-		delete(builder.buf)
-		data, ok := os.read_entire_file_from_filename("dump.txt")
-		defer delete(data)
-		data_dynamic, ok1 := slice.to_dynamic(data)
-		builder.buf = data_dynamic
+                length := end - cursor_position
+                if builder.buf[end] != '\n' do length += 1
+                for _ in 0 ..< length do remove_forward_byte_at(editor, cursor_position)
 
-	    //TODO: implement delete key and deleting words with ctrl + backspace & ctrl + delete
+            case key == .A && rl.IsKeyDown(.LEFT_CONTROL):
+                line_id := get_visual_cursor_line_id(editor^)
+                cursor_position = lines[line_id].start
+
+            case key == .E && rl.IsKeyDown(.LEFT_CONTROL):
+                line_id := get_visual_cursor_line_id(editor^)
+                end := lines[line_id].end
+                if builder.buf[end] != '\n' do end += 1
+                cursor_position = end
+
+            //TODO: have a menu to open files and a save as option
+            case key == .S && rl.IsKeyDown(.LEFT_CONTROL) && rl.IsKeyDown(.LEFT_SHIFT):
+                file_name := "dump.txt"
+                fd, err := os.open(file_name, os.O_CREATE)
+                if err != os.ERROR_NONE do panic("failed to save file")
+                defer os.close(fd)
+                _, err1 := os.write_string(fd, strings.to_string(builder))
+                if err1 != os.ERROR_NONE do panic("failed to write to file")
+
+            case rl.IsKeyDown(.LEFT_CONTROL) && key == .O:
+                delete(builder.buf)
+                data, ok := os.read_entire_file_from_filename("dump.txt")
+                defer delete(data)
+                data_dynamic, ok1 := slice.to_dynamic(data)
+                builder.buf = data_dynamic
+
+            //TODO: deleting words with ctrl + backspace & ctrl + delete
 
             case key == .UP:
                 line_id := get_visual_cursor_line_id(editor^)
@@ -281,25 +337,25 @@ write_byte :: proc(using editor: ^Editor, byte_to_write: byte) {
     } else do strings.write_byte(&builder, byte_to_write)
 }
 
-remove_back_byte :: proc(using editor: ^Editor) {
-    if cursor_position == 0 do return
+remove_back_byte_at :: proc(using editor: ^Editor, position: int) {
+    if position == 0 do return
     length := len(builder.buf)
     capacity := cap(builder.buf)
-    if cursor_position == len(builder.buf) do strings.pop_byte(&builder)
+    if position == len(builder.buf) do strings.pop_byte(&builder)
     else {
-        mem.copy(&builder.buf[cursor_position - 1], &builder.buf[cursor_position], capacity - cursor_position)
+        mem.copy(&builder.buf[position - 1], &builder.buf[position], capacity - position)
         d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
         d.len = max(length - 1, 0)
     }
 }
 
-remove_forward_byte :: proc(using editor: ^Editor) {
-    if cursor_position >= len(builder.buf) - 1 do return
+remove_forward_byte_at :: proc(using editor: ^Editor, position: int) {
+    if position >= len(builder.buf) - 1 do return
     length := len(builder.buf)
     capacity := cap(builder.buf)
 
-    mem.copy(&builder.buf[cursor_position], &builder.buf[cursor_position + 1], capacity - (cursor_position + 1))
-    
+    mem.copy(&builder.buf[position], &builder.buf[position + 1], capacity - (position + 1))
+
 }
 
 get_visual_cursor_line_id :: proc(using editor: Editor) -> int {
