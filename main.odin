@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:strings"
 import "core:runtime"
 import "core:mem"
+import "core:mem/virtual"
 import "core:slice"
 import "core:os"
 import rl "vendor:raylib"
@@ -19,30 +20,36 @@ Line :: struct {
 }
 
 Editor :: struct {
-    cursor_position: int,
-    prev_key:        rl.KeyboardKey,
-    tick:            int,
-    builder:         strings.Builder,
-    lines:           [dynamic]Line,
-    font:            rl.Font,
-    text_measure:    rl.Vector2,
-    font_size:       int,
+    header_id:             int,
+    cursor_position:       int,
+    prev_key:              rl.KeyboardKey,
+    tick:                  int,
+    font:                  rl.Font,
+    text_measure:          rl.Vector2,
+    font_size:             int,
+    headers:               [dynamic]^Header,
+    header_memory_manager: Header_memory_manager,
 }
 
 Header :: struct {
-    state: enum {
-	todo,
-	done,
-	waiting,
+    work_state:        enum {
+        none,
+        todo,
+        done,
+        waiting,
     },
-    parent_header: ^Header,
-    children_headers: [dynamic]^Header,
-    text: strings.Builder,
-    tags: enum {
-	A,
-	B,
-	C,
+    toggle_state:      enum {
+        none,
+        hidden,
+        just_header,
+        subheaders,
+        sub_subheaders,
     },
+    builder:           strings.Builder,
+    lines:             [dynamic]Line,
+    parent_header:     ^Header,
+    children_headers:  [dynamic]^Header,
+    indentation_level: int,
 }
 
 init_editor :: proc(using editor: ^Editor, font_size_to_use: int) -> mem.Allocator_Error {
@@ -50,8 +57,10 @@ init_editor :: proc(using editor: ^Editor, font_size_to_use: int) -> mem.Allocat
     font_size = font_size_to_use
     text_measure = rl.MeasureTextEx(font, "t", auto_cast font_size, 0)
     tick = TICK_DURATION
-    builder = strings.builder_make() or_return
-    lines = make([dynamic]Line) or_return
+    init_header_memory_manager(&header_memory_manager)
+
+    headers = make([dynamic]^Header)
+    append(&headers, make_header(&header_memory_manager))
     return .None
 }
 
@@ -87,16 +96,33 @@ main :: proc() {
         execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             switch {
             case key == .BACKSPACE:
-                remove_back_byte_at(editor, cursor_position)
-                cursor_position -= 1
-                cursor_position = max(0, cursor_position)
+                if len(headers[header_id].builder.buf) == 0 && header_id != 0 {
+                    delete_current_header(editor)
+                    using new_header := headers[header_id]
+                    //NOTE: +1 because lines don't end with \n anymore lul
+                    if header_id != 0 {
+                        if len(lines) > 0 do cursor_position = slice.last(lines[:]).end + 1
+                        else do cursor_position = 0
+                    } else {
+                        if len(lines) > 0 && lines[0].end - lines[0].start > 0 do cursor_position = lines[0].end + 1
+                        else do cursor_position = 0
+                    }
+                } else {
+                    remove_back_byte_at(editor, cursor_position)
+                    cursor_position -= 1
+                    cursor_position = max(0, cursor_position)
+                }
 
             case key == .ENTER:
-                write_byte(editor, '\n')
-                cursor_position += 1
-                cursor_position = min(cursor_position, len(strings.to_string(builder)))
+                header_id += 1
+                append(&headers, make_header(&header_memory_manager))
+                cursor_position = 0
+
+            //TODO: have enter+shift to make a newline
+            //TODO: Tab to indent a header => making it a child header to another header
 
             case key == .RIGHT:
+                using header := headers[header_id]
                 cursor_position += 1
                 cursor_position = min(cursor_position, len(strings.to_string(builder)))
 
@@ -104,11 +130,14 @@ main :: proc() {
                 cursor_position -= 1
                 cursor_position = max(0, cursor_position)
 
+            //TODO: rework for headers
             case (key == .D && rl.IsKeyDown(.LEFT_CONTROL)) || key == .DELETE:
                 remove_forward_byte_at(editor, cursor_position)
             // no cursor movement with the delete key
 
+            //TODO: rework for headers
             case key == .W && rl.IsKeyDown(.LEFT_CONTROL):
+                using header := headers[header_id]
                 line_id := get_visual_cursor_line_id(editor^)
                 end_line_id := len(lines) - 1 if len(lines) > 1 else -1
 
@@ -141,6 +170,7 @@ main :: proc() {
                 } else do panic("can't be here!!!")
 
             case key == .K && rl.IsKeyDown(.LEFT_CONTROL):
+                using header := headers[header_id]
                 line_id := get_visual_cursor_line_id(editor^)
                 using line := lines[line_id]
 
@@ -149,10 +179,12 @@ main :: proc() {
                 for _ in 0 ..< length do remove_forward_byte_at(editor, cursor_position)
 
             case key == .A && rl.IsKeyDown(.LEFT_CONTROL):
+                using header := headers[header_id]
                 line_id := get_visual_cursor_line_id(editor^)
                 cursor_position = lines[line_id].start
 
             case key == .E && rl.IsKeyDown(.LEFT_CONTROL):
+                using header := headers[header_id]
                 line_id := get_visual_cursor_line_id(editor^)
                 end := lines[line_id].end
                 if builder.buf[end] != '\n' do end += 1
@@ -160,6 +192,7 @@ main :: proc() {
 
             //TODO: have a menu to open files and a save as option
             case key == .S && rl.IsKeyDown(.LEFT_CONTROL) && rl.IsKeyDown(.LEFT_SHIFT):
+                using header := headers[header_id]
                 file_name := "dump.txt"
                 fd, err := os.open(file_name, os.O_CREATE)
                 if err != os.ERROR_NONE do panic("failed to save file")
@@ -168,6 +201,7 @@ main :: proc() {
                 if err1 != os.ERROR_NONE do panic("failed to write to file")
 
             case rl.IsKeyDown(.LEFT_CONTROL) && key == .O:
+                using header := headers[header_id]
                 delete(builder.buf)
                 data, ok := os.read_entire_file_from_filename("dump.txt")
                 defer delete(data)
@@ -176,7 +210,10 @@ main :: proc() {
 
             //TODO: deleting words with ctrl + backspace & ctrl + delete
 
+            //TODO: UP and DOWN will be a bit complicated with headers
+            // go between lines and headers depending on if the cursor is at the first/last line of text buffer
             case key == .UP:
+                using header := headers[header_id]
                 line_id := get_visual_cursor_line_id(editor^)
                 if line_id == 0 do return
 
@@ -196,6 +233,7 @@ main :: proc() {
                 }
 
             case key == .DOWN:
+                using header := headers[header_id]
                 line_id := get_visual_cursor_line_id(editor^)
                 // VISUAL line              Real line
                 if line_id == len(lines) || line_id == len(lines) - 1 do return
@@ -204,11 +242,15 @@ main :: proc() {
                 offset_current_line := cursor_position - current_line.start
                 new_line := lines[line_id + 1]
 
-                length_newline: int = new_line.end - new_line.start if builder.buf[new_line.end] == '\n' else new_line.end - new_line.start + 1
+                length_newline: int
+                if builder.buf[new_line.end] == '\n' do length_newline = new_line.end - new_line.start
+                else do length_newline = new_line.end - new_line.start + 1
+
                 if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
                 else do cursor_position = new_line.end
 
             case is_printable(key):
+                using header := headers[header_id]
                 byte_to_write := determine_printable_byte(key)
                 write_byte(editor, byte_to_write)
                 cursor_position += 1
@@ -225,6 +267,8 @@ main :: proc() {
         }
 
         {     // determine lines in builder
+            //NOTE: Just doing it for header 1, will need to make it general (only do it for headers that just changed, or simply for the header_id)
+            using header := headers[header_id]
             clear(&lines)
             for char, id in strings.to_string(builder) {
                 if char == '\n' || id == strings.builder_len(builder) - 1 {
@@ -243,24 +287,45 @@ main :: proc() {
 
         cursor_coords: [2]int
         {
+            using header := headers[header_id]
             current_line_id := get_visual_cursor_line_id(editor)
             ending_of_line := -1
             if current_line_id != 0 && len(lines) > 1 do ending_of_line = lines[current_line_id - 1].end
             else if cursor_position == len(builder.buf) && current_line_id != 0 do ending_of_line = cursor_position - 1
-            cursor_coords = {cursor_position - ending_of_line - 1, current_line_id}
+            //NOTE: header_id as the y coord is only true for when all the headers are all 1 screen width long
+            cursor_coords = {cursor_position - ending_of_line - 1, header_id}
         }
 
-        str := strings.to_string(builder)
-        //TODO: (joe) Separate by newline and draw each line separatly
-        DrawTextEx(font, fmt.ctprintf("%v", str), {0, 0}, 20, 0, WHITE)
-        DrawRectangleV(
-            {
-                auto_cast (cursor_coords.x) * text_measure.x,
-                1 + (text_measure.y + 10) * auto_cast cursor_coords.y,
-            },
-            {0.5 * text_measure.x, text_measure.y - 4},
-            BLUE,
-        )
+        {     //Render text
+            for header, header_id in headers {
+                using header
+                str := strings.to_string(builder)
+                //TODO: Have the circle rendered depending on the indentation of the header (also different color as well)
+                DrawCircle(
+                    auto_cast text_measure.x / 2. + 2,
+                    auto_cast text_measure.y / 2 + auto_cast header_id * auto_cast (text_measure.y + 2),
+                    text_measure.x / 3,
+                    GREEN,
+                )
+                DrawTextEx(
+                    font,
+                    fmt.ctprintf("%v", str),
+                    {text_measure.x + 4 + 2, 1 + (text_measure.y + 2) * auto_cast header_id},
+                    20,
+                    0,
+                    WHITE,
+                )
+            }
+            DrawRectangleV(
+                {
+                    auto_cast (cursor_coords.x) * text_measure.x + text_measure.x + 4 + 2,
+                    1 + (text_measure.y + 2) * auto_cast header_id,
+                },
+                {0.5 * text_measure.x, text_measure.y - 4},
+                BLUE,
+            )
+
+        }
     }
 }
 
@@ -324,6 +389,7 @@ determine_printable_byte :: proc(key: rl.KeyboardKey) -> (byte_to_write: byte) {
 }
 
 write_byte :: proc(using editor: ^Editor, byte_to_write: byte) {
+    using header := headers[header_id]
     length := strings.builder_len(builder)
     capacity := cap(builder.buf)
     if cursor_position != length && length > 0 {
@@ -338,6 +404,7 @@ write_byte :: proc(using editor: ^Editor, byte_to_write: byte) {
 }
 
 remove_back_byte_at :: proc(using editor: ^Editor, position: int) {
+    using header := headers[header_id]
     if position == 0 do return
     length := len(builder.buf)
     capacity := cap(builder.buf)
@@ -350,6 +417,7 @@ remove_back_byte_at :: proc(using editor: ^Editor, position: int) {
 }
 
 remove_forward_byte_at :: proc(using editor: ^Editor, position: int) {
+    using header := headers[header_id]
     if position >= len(builder.buf) - 1 do return
     length := len(builder.buf)
     capacity := cap(builder.buf)
@@ -359,6 +427,7 @@ remove_forward_byte_at :: proc(using editor: ^Editor, position: int) {
 }
 
 get_visual_cursor_line_id :: proc(using editor: Editor) -> int {
+    using header := headers[header_id]
     if len(lines) == 0 do return 0
 
     current_line_id := 0

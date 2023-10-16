@@ -13,9 +13,14 @@ Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 * DONE Fixed multiline cursor postion (no more offset) (Cheat)
 * DONE start/end of line with C-a/C-e
 * DONE delete key and C-d
+* DONE Have multiple headers 
+* DONE pool of headers, (fewer mallocs to do that way)
+* DONE can "delete" headers
+* TODO Move between headers
 * TODO make hierarchical headers
 * TODO toggle todo/done on headers
 * TODO Fold Headers
+* TODO Headers with multiline
 * TODO save state to file [1/3]
 ** DONE Can save
 ** TODO choose file to open
@@ -31,3 +36,12 @@ Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 ** TODO draw tabs correctly
 ** TODO remove correctly
 * TODO Have auto-completion with english words
+
+
+
+
+
+
+
+
+
