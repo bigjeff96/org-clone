@@ -5,14 +5,14 @@ import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
 
-Linked_list_header :: struct {
-    free_header: ^Header,
-    next:        ^Linked_list_header,
+Node :: struct($T: typeid) {
+    value: ^T,
+    next:  ^Node(T),
 }
 
 Header_memory_manager :: struct {
     raw_headers: [dynamic]Header,
-    free_list:   ^Linked_list_header,
+    free_list:   ^Node(Header),
     allocator:   mem.Allocator,
 }
 
@@ -25,13 +25,13 @@ init_header_memory_manager :: proc(using h: ^Header_memory_manager) {
 
     raw_headers = make([dynamic]Header, h.allocator)
     append(&raw_headers, Header{})
-    free_list = new(Linked_list_header)
-    free_list.free_header = &raw_headers[0]
+    free_list = new(Node(Header))
+    free_list.value = &raw_headers[0]
     free_list.next = nil
 }
 
 make_header :: proc(using h: ^Header_memory_manager) -> ^Header {
-    result := free_list.free_header
+    result := free_list.value
 
     if free_list.next != nil {
         free(free_list)
@@ -42,7 +42,7 @@ make_header :: proc(using h: ^Header_memory_manager) -> ^Header {
         builder = strings.builder_make()
         lines = make([dynamic]Line)
         children_headers = make([dynamic]^Header)
-        free_list.free_header = &raw_headers[len(raw_headers) - 1]
+        free_list.value = &raw_headers[len(raw_headers) - 1]
     }
     return result
 }
@@ -59,12 +59,11 @@ delete_current_header :: proc(using editor: ^Editor) {
     parent_header = nil
     indentation_level = 0
 
-    new_free_list := new(Linked_list_header)
-    new_free_list.free_header = header
+    new_free_list := new(Node(Header))
+    new_free_list.value = header
     new_free_list.next = free_list
     free_list = new_free_list
 
     ordered_remove(&headers, header_id)
     header_id = min(header_id, len(headers) - 1)
 }
-

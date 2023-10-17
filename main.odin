@@ -14,6 +14,8 @@ import "vendor:stb/src"
 
 TICK_DURATION :: 15
 
+HEADERS_ONE_LINE :: true
+
 Line :: struct {
     start: int,
     end:   int,
@@ -119,7 +121,7 @@ main :: proc() {
                 cursor_position = 0
 
             //TODO: have enter+shift to make a newline
-            //TODO: Tab to indent a header => making it a child header to another header
+
 
             case key == .RIGHT:
                 using header := headers[header_id]
@@ -130,7 +132,6 @@ main :: proc() {
                 cursor_position -= 1
                 cursor_position = max(0, cursor_position)
 
-            //TODO: rework for headers
             case (key == .D && rl.IsKeyDown(.LEFT_CONTROL)) || key == .DELETE:
                 remove_forward_byte_at(editor, cursor_position)
             // no cursor movement with the delete key
@@ -208,46 +209,65 @@ main :: proc() {
                 data_dynamic, ok1 := slice.to_dynamic(data)
                 builder.buf = data_dynamic
 
+            //TODO: Alt + arrows to indent/unindent a header 
+            case key == .RIGHT && rl.IsKeyDown(.LEFT_ALT):
+                using header := headers[header_id]
+
+            // indentation += 1
+            // parent header is previous header
+            // parent header updates its children headers
+
             //TODO: deleting words with ctrl + backspace & ctrl + delete
 
-            //TODO: UP and DOWN will be a bit complicated with headers
-            // go between lines and headers depending on if the cursor is at the first/last line of text buffer
+            //TODO: go between lines and headers depending on if the cursor is at the first/last line of text buffer
             case key == .UP:
-                using header := headers[header_id]
-                line_id := get_visual_cursor_line_id(editor^)
-                if line_id == 0 do return
-
-                // current line is REAL
-                if line_id < len(lines) {
-                    assert(len(lines) > 1)
-                    current_line := lines[line_id]
-                    offset_current_line := cursor_position - current_line.start
-                    new_line := lines[line_id - 1]
-
-                    length_newline := new_line.end - new_line.start
-                    if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
-                    else do cursor_position = new_line.end
+                when HEADERS_ONE_LINE {
+                    header_id = max(0, header_id - 1)
+                    //TODO: position cursor_position correctly
+                    cursor_position = 0
                 } else {
-                    // no characters in current line
-                    cursor_position = slice.last(lines[:]).start
+                    using header := headers[header_id]
+                    line_id := get_visual_cursor_line_id(editor^)
+                    if line_id == 0 do return
+
+                    // current line is REAL
+                    if line_id < len(lines) {
+                        assert(len(lines) > 1)
+                        current_line := lines[line_id]
+                        offset_current_line := cursor_position - current_line.start
+                        new_line := lines[line_id - 1]
+
+                        length_newline := new_line.end - new_line.start
+                        if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
+                        else do cursor_position = new_line.end
+                    } else {
+                        // no characters in current line
+                        cursor_position = slice.last(lines[:]).start
+                    }
                 }
 
             case key == .DOWN:
-                using header := headers[header_id]
-                line_id := get_visual_cursor_line_id(editor^)
-                // VISUAL line              Real line
-                if line_id == len(lines) || line_id == len(lines) - 1 do return
+                when HEADERS_ONE_LINE {
+                    header_id = min(len(headers) - 1, header_id + 1)
+                    //TODO: position cursor_position correctly
+                    cursor_position = 0
+                } else {
+                    using header := headers[header_id]
+                    line_id := get_visual_cursor_line_id(editor^)
+                    // VISUAL line              Real line
+                    if line_id == len(lines) || line_id == len(lines) - 1 do return
 
-                current_line := lines[line_id]
-                offset_current_line := cursor_position - current_line.start
-                new_line := lines[line_id + 1]
+                    current_line := lines[line_id]
+                    offset_current_line := cursor_position - current_line.start
+                    new_line := lines[line_id + 1]
 
-                length_newline: int
-                if builder.buf[new_line.end] == '\n' do length_newline = new_line.end - new_line.start
-                else do length_newline = new_line.end - new_line.start + 1
+                    length_newline: int
+                    if builder.buf[new_line.end] == '\n' do length_newline = new_line.end - new_line.start
+                    else do length_newline = new_line.end - new_line.start + 1
 
-                if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
-                else do cursor_position = new_line.end
+                    if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
+                    else do cursor_position = new_line.end
+                }
 
             case is_printable(key):
                 using header := headers[header_id]
@@ -297,6 +317,7 @@ main :: proc() {
         }
 
         {     //Render text
+            //TODO: Be able to scroll from top to bottom, such that the file can be bigger than the rendered screen
             for header, header_id in headers {
                 using header
                 str := strings.to_string(builder)
@@ -305,8 +326,9 @@ main :: proc() {
                     auto_cast text_measure.x / 2. + 2,
                     auto_cast text_measure.y / 2 + auto_cast header_id * auto_cast (text_measure.y + 2),
                     text_measure.x / 3,
-                    GREEN,
+                    PURPLE,
                 )
+                //TODO: Render text such that we have newlines, and at some point, some line-wrapping
                 DrawTextEx(
                     font,
                     fmt.ctprintf("%v", str),
@@ -316,6 +338,7 @@ main :: proc() {
                     WHITE,
                 )
             }
+            //Cursor
             DrawRectangleV(
                 {
                     auto_cast (cursor_coords.x) * text_measure.x + text_measure.x + 4 + 2,
@@ -418,12 +441,20 @@ remove_back_byte_at :: proc(using editor: ^Editor, position: int) {
 
 remove_forward_byte_at :: proc(using editor: ^Editor, position: int) {
     using header := headers[header_id]
-    if position >= len(builder.buf) - 1 do return
+    if position > len(builder.buf) - 1 do return
+
     length := len(builder.buf)
     capacity := cap(builder.buf)
 
-    mem.copy(&builder.buf[position], &builder.buf[position + 1], capacity - (position + 1))
+    if position == len(builder.buf) - 1 && len(builder.buf) >= 1 {
+        d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
+        d.len = max(length - 1, 0)
+        return
+    }
 
+    mem.copy(&builder.buf[position], &builder.buf[position + 1], capacity - (position + 1))
+    d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
+    d.len = max(length - 1, 0)
 }
 
 get_visual_cursor_line_id :: proc(using editor: Editor) -> int {
