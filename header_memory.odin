@@ -30,6 +30,7 @@ init_header_memory_manager :: proc(using h: ^Header_memory_manager) {
     free_list.next = nil
 }
 
+@(require_results)
 make_header :: proc(using h: ^Header_memory_manager) -> ^Header {
     result := free_list.value
 
@@ -50,6 +51,16 @@ make_header :: proc(using h: ^Header_memory_manager) -> ^Header {
 delete_current_header :: proc(using editor: ^Editor) {
     using header := headers[header_id]
     using header_memory_manager
+
+    //remove this header from the children_headers list of its parent
+    if len(parent_header.children_headers) > 0 {
+        child_id := 0
+        for child_header, id in parent_header.children_headers[:] do if child_header == header {
+            child_id = id
+            break
+        }
+        unordered_remove(&parent_header.children_headers, child_id)
+    }
 
     clear(&builder.buf)
     clear(&lines)
