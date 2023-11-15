@@ -53,7 +53,7 @@ delete_current_header :: proc(using editor: ^Editor) {
     using header_memory_manager
 
     //remove this header from the children_headers list of its parent
-    if len(parent_header.children_headers) > 0 {
+    if parent_header != nil && len(parent_header.children_headers) > 0 {
         child_id := 0
         for child_header, id in parent_header.children_headers[:] do if child_header == header {
             child_id = id

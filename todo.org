@@ -17,6 +17,7 @@ Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 * DONE pool of headers, (fewer mallocs to do that way)
 * DONE can "delete" headers
 * DONE Move between headers
+* TODO Redo the logic of the tree structure of the headers with linked lists instead of arrays, to see what happens with that
 * TODO make hierarchical headers
 * TODO toggle todo/done on headers
 * TODO Fold Headers
@@ -36,12 +37,3 @@ Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 ** TODO draw tabs correctly
 ** TODO remove correctly
 * TODO Have auto-completion with english words
-
-
-
-
-
-
-
-
-
