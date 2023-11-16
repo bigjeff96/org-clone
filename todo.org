@@ -9,7 +9,7 @@ What I have tried so far is not working ( it has to do with state between keyboa
 Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 * DONE Refactor
 * DONE Move cursor up/down
-** DONE fixed error when moving down a line at the end
+* DONE fixed error when moving down a line at the end
 * DONE Fixed multiline cursor postion (no more offset) (Cheat)
 * DONE start/end of line with C-a/C-e
 * DONE delete key and C-d
@@ -17,8 +17,9 @@ Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 * DONE pool of headers, (fewer mallocs to do that way)
 * DONE can "delete" headers
 * DONE Move between headers
-* TODO Redo the logic of the tree structure of the headers with linked lists instead of arrays, to see what happens with that
-* TODO separate the execute command proc from the main proc
+* DONE separate the execute command proc from the main proc
+* TODO Fix the logic for the determination of when headers change indentation
+* TODO experiemnt with linkled lists in another branch (will this make the code easier?)
 * TODO make hierarchical headers
 * TODO toggle todo/done on headers
 * TODO Fold Headers
