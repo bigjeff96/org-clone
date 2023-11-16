@@ -18,8 +18,9 @@ Will need to do some mem.copy stuff etc, look a tsoding ded code for insperation
 * DONE can "delete" headers
 * DONE Move between headers
 * DONE separate the execute command proc from the main proc
+* DONE delete words with C-backspace
 * TODO Fix the logic for the determination of when headers change indentation
-* TODO experiemnt with linkled lists in another branch (will this make the code easier?)
+* TODO experiment with linkled lists in another branch (will this make the code easier?)
 * TODO make hierarchical headers
 * TODO toggle todo/done on headers
 * TODO Fold Headers

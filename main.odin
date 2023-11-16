@@ -127,7 +127,6 @@ main :: proc() {
         cursor_coords: [2]int
         cursor_x_offset: int
         {
-            //TODO: cursor will need to know the indentation level of the header it is on
             using header := headers[header_id]
             current_line_id := get_visual_cursor_line_id(editor)
             cursor_x_offset = indentation_level * INDENTATION_AMOUNT
@@ -178,7 +177,6 @@ main :: proc() {
                 )
             }
             //Cursor
-            //TODO: cursor will need to know the indentation level of the header it is on
             DrawRectangleV(
                 {
                     auto_cast (cursor_coords.x) * text_measure.x +
@@ -196,133 +194,32 @@ main :: proc() {
     }
 }
 
-is_printable :: proc(key: rl.KeyboardKey) -> bool {
-    key: int = auto_cast key
-    return key >= 32 && key <= 127
-}
-
-is_alpha :: proc(key: rl.KeyboardKey) -> bool {
-    key: int = auto_cast key
-    return key >= 65 && key <= 90
-}
-
-shift_key_down :: proc() -> bool {
-    return rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT)
-}
-
-determine_printable_byte :: proc(key: rl.KeyboardKey) -> (byte_to_write: byte) {
-    // Because I don't know how to use raylib GetCharPressed
-    assert(is_printable(key))
-    switch {
-    case is_alpha(key):
-        if !shift_key_down() do byte_to_write = (auto_cast key) + 32
-        else do byte_to_write = auto_cast key
-    case shift_key_down():
-        switch {
-        case key == .ONE:
-            byte_to_write = 33
-        case key == .TWO:
-            byte_to_write = 64
-        case key == .THREE:
-            byte_to_write = 35
-        case key == .FOUR:
-            byte_to_write = 36
-        case key == .FIVE:
-            byte_to_write = 37
-        case key == .SIX:
-            byte_to_write = 94
-        case key == .SEVEN:
-            byte_to_write = 38
-        case key == .EIGHT:
-            byte_to_write = 42
-        case key == .NINE:
-            byte_to_write = 40
-        case key == .ZERO:
-            byte_to_write = 41
-        case key == .MINUS:
-            byte_to_write = 95
-        case key == .EQUAL:
-            byte_to_write = 43
-        case key == .SLASH:
-            byte_to_write = 63
-        case key == .APOSTROPHE:
-            byte_to_write = 34
-        }
-    case:
-        byte_to_write = auto_cast key
-    }
-
-    return
-}
-
-write_byte :: proc(using editor: ^Editor, byte_to_write: byte) {
-    using header := headers[header_id]
-    length := strings.builder_len(builder)
-    capacity := cap(builder.buf)
-    if cursor_position != length && length > 0 {
-        strings.write_byte(&builder, 0)
-        mem.copy(
-            &builder.buf[cursor_position + 1],
-            &builder.buf[cursor_position],
-            capacity - cursor_position,
-        )
-        builder.buf[cursor_position] = byte_to_write
-    } else do strings.write_byte(&builder, byte_to_write)
-}
-
-remove_back_byte_at :: proc(using editor: ^Editor, position: int) {
-    using header := headers[header_id]
-    if position == 0 do return
-    length := len(builder.buf)
-    capacity := cap(builder.buf)
-    if position == len(builder.buf) do strings.pop_byte(&builder)
-    else {
-        mem.copy(&builder.buf[position - 1], &builder.buf[position], capacity - position)
-        d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
-        d.len = max(length - 1, 0)
-    }
-}
-
-remove_forward_byte_at :: proc(using editor: ^Editor, position: int) {
-    using header := headers[header_id]
-    if position > len(builder.buf) - 1 do return
-
-    length := len(builder.buf)
-    capacity := cap(builder.buf)
-
-    if position == len(builder.buf) - 1 && len(builder.buf) >= 1 {
-        d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
-        d.len = max(length - 1, 0)
-        return
-    }
-
-    mem.copy(&builder.buf[position], &builder.buf[position + 1], capacity - (position + 1))
-    d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
-    d.len = max(length - 1, 0)
-}
-
-get_visual_cursor_line_id :: proc(using editor: Editor) -> int {
-    using header := headers[header_id]
-    if len(lines) == 0 do return 0
-
-    current_line_id := 0
-    for line in lines {
-        if cursor_position >= line.start {
-            end_line_byte := builder.buf[line.end]
-            test: int
-            if end_line_byte == '\n' do test = line.end
-            else do test = line.end + 1
-
-            if cursor_position <= test do break
-        }
-        current_line_id += 1
-    }
-
-    return current_line_id
-}
-
 execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
     switch {
+
+    case key == .BACKSPACE && rl.IsKeyDown(.LEFT_CONTROL):
+	using header := headers[header_id]
+	using builder
+	//delete everything until the cursor meets whitespace
+	//TODO: add some checks on cursor_position to stop craches
+
+	if cursor_position == 0 do break
+	if strings.is_space(auto_cast buf[cursor_position - 1]) {
+	    for strings.is_space(auto_cast buf[cursor_position - 1]) && len(buf) != 0 {
+		remove_back_byte_at(editor, cursor_position)
+		cursor_position -= 1
+		cursor_position = max(0, cursor_position)
+		if cursor_position == 0 do break
+	    }
+	} else {
+	    for !strings.is_space(auto_cast buf[cursor_position - 1]) && len(buf) != 0 {
+		remove_back_byte_at(editor, cursor_position)
+		cursor_position -= 1
+		cursor_position = max(0, cursor_position)
+		if cursor_position == 0 do break
+	    }
+	}
+	
     case key == .BACKSPACE:
         if len(headers[header_id].builder.buf) == 0 && header_id != 0 {
             delete_current_header(editor)
@@ -395,6 +292,16 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
 
             //for now, only one level of indentation
             parent_header = nil
+
+            //unindent children
+            unindent_children :: proc(children_headers: []^Header) {
+                for &header in children_headers {
+                    using header
+                    indentation_level = max(parent_header.indentation_level - 1, indentation_level - 1, 0)
+                    unindent_children(header.children_headers[:])
+                }
+            }
+            unindent_children(children_headers[:])
 
             //how do I position the new header in the main list now?
 
@@ -497,8 +404,6 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
         builder.buf = data_dynamic
 
 
-    //TODO: deleting words with ctrl + backspace & ctrl + delete
-
     //TODO: go between lines and headers depending on if the cursor is at the first/last line of
     //text buffer
     case key == .UP:
@@ -561,4 +466,129 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
         cursor_position += 1
         cursor_position = min(cursor_position, len(strings.to_string(builder)))
     }
+}
+
+write_byte :: proc(using editor: ^Editor, byte_to_write: byte) {
+    using header := headers[header_id]
+    length := strings.builder_len(builder)
+    capacity := cap(builder.buf)
+    if cursor_position != length && length > 0 {
+        strings.write_byte(&builder, 0)
+        mem.copy(
+            &builder.buf[cursor_position + 1],
+            &builder.buf[cursor_position],
+            capacity - cursor_position,
+        )
+        builder.buf[cursor_position] = byte_to_write
+    } else do strings.write_byte(&builder, byte_to_write)
+}
+
+remove_back_byte_at :: proc(using editor: ^Editor, position: int) {
+    using header := headers[header_id]
+    if position == 0 do return
+    length := len(builder.buf)
+    capacity := cap(builder.buf)
+    if position == len(builder.buf) do strings.pop_byte(&builder)
+    else {
+        mem.copy(&builder.buf[position - 1], &builder.buf[position], capacity - position)
+        d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
+        d.len = max(length - 1, 0)
+    }
+}
+
+remove_forward_byte_at :: proc(using editor: ^Editor, position: int) {
+    using header := headers[header_id]
+    if position > len(builder.buf) - 1 do return
+
+    length := len(builder.buf)
+    capacity := cap(builder.buf)
+
+    if position == len(builder.buf) - 1 && len(builder.buf) >= 1 {
+        d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
+        d.len = max(length - 1, 0)
+        return
+    }
+
+    mem.copy(&builder.buf[position], &builder.buf[position + 1], capacity - (position + 1))
+    d := cast(^runtime.Raw_Dynamic_Array)&builder.buf
+    d.len = max(length - 1, 0)
+}
+
+get_visual_cursor_line_id :: proc(using editor: Editor) -> int {
+    using header := headers[header_id]
+    if len(lines) == 0 do return 0
+
+    current_line_id := 0
+    for line in lines {
+        if cursor_position >= line.start {
+            end_line_byte := builder.buf[line.end]
+            test: int
+            if end_line_byte == '\n' do test = line.end
+            else do test = line.end + 1
+
+            if cursor_position <= test do break
+        }
+        current_line_id += 1
+    }
+
+    return current_line_id
+}
+
+is_printable :: proc(key: rl.KeyboardKey) -> bool {
+    key: int = auto_cast key
+    return key >= 32 && key <= 127
+}
+
+is_alpha :: proc(key: rl.KeyboardKey) -> bool {
+    key: int = auto_cast key
+    return key >= 65 && key <= 90
+}
+
+shift_key_down :: proc() -> bool {
+    return rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT)
+}
+
+determine_printable_byte :: proc(key: rl.KeyboardKey) -> (byte_to_write: byte) {
+    // Because I don't know how to use raylib GetCharPressed
+    assert(is_printable(key))
+    switch {
+    case is_alpha(key):
+        if !shift_key_down() do byte_to_write = (auto_cast key) + 32
+        else do byte_to_write = auto_cast key
+    case shift_key_down():
+        switch {
+        case key == .ONE:
+            byte_to_write = 33
+        case key == .TWO:
+            byte_to_write = 64
+        case key == .THREE:
+            byte_to_write = 35
+        case key == .FOUR:
+            byte_to_write = 36
+        case key == .FIVE:
+            byte_to_write = 37
+        case key == .SIX:
+            byte_to_write = 94
+        case key == .SEVEN:
+            byte_to_write = 38
+        case key == .EIGHT:
+            byte_to_write = 42
+        case key == .NINE:
+            byte_to_write = 40
+        case key == .ZERO:
+            byte_to_write = 41
+        case key == .MINUS:
+            byte_to_write = 95
+        case key == .EQUAL:
+            byte_to_write = 43
+        case key == .SLASH:
+            byte_to_write = 63
+        case key == .APOSTROPHE:
+            byte_to_write = 34
+        }
+    case:
+        byte_to_write = auto_cast key
+    }
+
+    return
 }
