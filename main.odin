@@ -5,6 +5,7 @@ import "core:strings"
 import "core:runtime"
 import "core:mem"
 import "core:mem/virtual"
+import "core:testing"
 import "core:slice"
 import "core:os"
 import rl "vendor:raylib"
@@ -70,7 +71,7 @@ main :: proc() {
     using rl
     SetWindowState({.MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_RESIZABLE})
     SetTargetFPS(60)
-    InitWindow(800, 800, "org-clone")
+    InitWindow(500, 500, "org-clone")
     defer CloseWindow()
 
     ctx := mu_rl.raylib_cxt()
@@ -106,8 +107,9 @@ main :: proc() {
                         if len(lines) > 0 do cursor_position = slice.last(lines[:]).end + 1
                         else do cursor_position = 0
                     } else {
-                        if len(lines) > 0 && lines[0].end - lines[0].start > 0 do cursor_position = lines[0].end + 1
-                        else do cursor_position = 0
+                        if len(lines) > 0 && lines[0].end - lines[0].start > 0 {
+                            cursor_position = lines[0].end + 1
+                        } else do cursor_position = 0
                     }
                 } else {
                     remove_back_byte_at(editor, cursor_position)
@@ -116,12 +118,68 @@ main :: proc() {
                 }
 
             case key == .ENTER:
+                //TODO: Have indentation be equal to the previous header's indentation
+                //TODO: if indentation > 0, it has a parent header, and this header is its child
                 header_id += 1
                 append(&headers, make_header(&header_memory_manager))
                 cursor_position = 0
 
             //TODO: have enter+shift to make a newline
 
+
+            //TODO: Alt + arrows to indent/unindent a header 
+            case rl.IsKeyDown(.LEFT_ALT) && key == .RIGHT:
+                using header := headers[header_id]
+
+                if parent_header != nil {
+                    //only one more than parent header
+                    indentation_level = min(parent_header.indentation_level + 1, indentation_level + 1)
+                } else {
+                    // previous header is the parent header now
+                    //(nope, its the next header with en indentation that is one less than the current header)
+                    //TODO: fix this
+                    if header_id > 0 {
+                        parent_header = headers[header_id - 1]
+                        indentation_level = parent_header.indentation_level + 1
+                        //TODO: make it also a child of the parent header
+                        append(&parent_header.children_headers, header)
+                    }
+                }
+                //update the indentation of all its children (this is recursive)
+                indent_children :: proc(children_headers: []^Header) {
+                    for &header in children_headers {
+                        using header
+                        indentation_level = min(parent_header.indentation_level + 1, indentation_level + 1)
+                        indent_children(header.children_headers[:])
+                    }
+                }
+                indent_children(children_headers[:])
+
+            case rl.IsKeyDown(.LEFT_ALT) && key == .LEFT:
+                using header := headers[header_id]
+
+                if parent_header != nil {
+                    indentation_level = max(0, parent_header.indentation_level - 1)
+
+                    //remove it from parents header children list
+                    id_child_list := 0
+
+                    for &child, id in parent_header.children_headers {
+                        if child == header do id_child_list = id
+                    }
+                    unordered_remove(&parent_header.children_headers, id_child_list)
+
+                    //for now, only one level of indentation
+                    parent_header = nil
+
+                    //how do I position the new header in the main list now?
+
+                    // now this header will be the child of a new header
+                }
+
+            // When we unindent a header, that header will no longer be a child header
+            //to its parent header and might
+            // become a new child header for a parent header with a smaller indentation
 
             case key == .RIGHT:
                 using header := headers[header_id]
@@ -138,37 +196,43 @@ main :: proc() {
 
             //TODO: rework for headers
             case key == .W && rl.IsKeyDown(.LEFT_CONTROL):
-                using header := headers[header_id]
-                line_id := get_visual_cursor_line_id(editor^)
-                end_line_id := len(lines) - 1 if len(lines) > 1 else -1
+                when HEADERS_ONE_LINE {
+                    using header := headers[header_id]
+                    clear(&builder.buf)
+                    if len(headers) > 1 do delete_current_header(editor)
+                } else {
+                    using header := headers[header_id]
+                    line_id := get_visual_cursor_line_id(editor^)
+                    end_line_id := len(lines) - 1 if len(lines) > 1 else -1
 
-                end := lines[line_id].end
-                start := lines[line_id].start
-                //TODO: refactor a bit (I repeat myself a bit too much)
-                if line_id != 0 && line_id != end_line_id {
-                    cursor_position = start
-                    length := end - start + 1
-                    for _ in 0 ..< length {
-                        remove_forward_byte_at(editor, cursor_position)
-                    }
-                } else if line_id == 0 {
-                    if len(lines) == 1 {
-                        clear(&builder.buf)
-                        cursor_position = 0
-                    } else {
+                    end := lines[line_id].end
+                    start := lines[line_id].start
+                    //TODO: refactor a bit (I repeat myself a bit too much)
+                    if line_id != 0 && line_id != end_line_id {
+                        cursor_position = start
                         length := end - start + 1
-                        cursor_position = 0
                         for _ in 0 ..< length {
                             remove_forward_byte_at(editor, cursor_position)
                         }
-                    }
-                } else if line_id == end_line_id {
-                    cursor_position = start
-                    length := end - start
-                    for _ in 0 ..< length {
-                        remove_forward_byte_at(editor, cursor_position)
-                    }
-                } else do panic("can't be here!!!")
+                    } else if line_id == 0 {
+                        if len(lines) == 1 {
+                            clear(&builder.buf)
+                            cursor_position = 0
+                        } else {
+                            length := end - start + 1
+                            cursor_position = 0
+                            for _ in 0 ..< length {
+                                remove_forward_byte_at(editor, cursor_position)
+                            }
+                        }
+                    } else if line_id == end_line_id {
+                        cursor_position = start
+                        length := end - start
+                        for _ in 0 ..< length {
+                            remove_forward_byte_at(editor, cursor_position)
+                        }
+                    } else do panic("can't be here!!!")
+                }
 
             case key == .K && rl.IsKeyDown(.LEFT_CONTROL):
                 using header := headers[header_id]
@@ -209,17 +273,11 @@ main :: proc() {
                 data_dynamic, ok1 := slice.to_dynamic(data)
                 builder.buf = data_dynamic
 
-            //TODO: Alt + arrows to indent/unindent a header 
-            case key == .RIGHT && rl.IsKeyDown(.LEFT_ALT):
-                using header := headers[header_id]
-
-            // indentation += 1
-            // parent header is previous header
-            // parent header updates its children headers
 
             //TODO: deleting words with ctrl + backspace & ctrl + delete
 
-            //TODO: go between lines and headers depending on if the cursor is at the first/last line of text buffer
+            //TODO: go between lines and headers depending on if the cursor is at the first/last line of
+            //text buffer
             case key == .UP:
                 when HEADERS_ONE_LINE {
                     header_id = max(0, header_id - 1)
@@ -238,8 +296,9 @@ main :: proc() {
                         new_line := lines[line_id - 1]
 
                         length_newline := new_line.end - new_line.start
-                        if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
-                        else do cursor_position = new_line.end
+                        if length_newline >= offset_current_line {
+                            cursor_position = new_line.start + offset_current_line
+                        } else do cursor_position = new_line.end
                     } else {
                         // no characters in current line
                         cursor_position = slice.last(lines[:]).start
@@ -265,8 +324,9 @@ main :: proc() {
                     if builder.buf[new_line.end] == '\n' do length_newline = new_line.end - new_line.start
                     else do length_newline = new_line.end - new_line.start + 1
 
-                    if length_newline >= offset_current_line do cursor_position = new_line.start + offset_current_line
-                    else do cursor_position = new_line.end
+                    if length_newline >= offset_current_line {
+                        cursor_position = new_line.start + offset_current_line
+                    } else do cursor_position = new_line.end
                 }
 
             case is_printable(key):
@@ -287,7 +347,8 @@ main :: proc() {
         }
 
         {     // determine lines in builder
-            //NOTE: Just doing it for header 1, will need to make it general (only do it for headers that just changed, or simply for the header_id)
+            //NOTE: Just doing it for header 1, will need to make it general
+            //(only do it for headers that just changed, or simply for the header_id)
             using header := headers[header_id]
             clear(&lines)
             for char, id in strings.to_string(builder) {
@@ -307,38 +368,57 @@ main :: proc() {
 
         cursor_coords: [2]int
         {
+            //TODO: cursor will need to know the indentation level of the header it is on
             using header := headers[header_id]
             current_line_id := get_visual_cursor_line_id(editor)
             ending_of_line := -1
             if current_line_id != 0 && len(lines) > 1 do ending_of_line = lines[current_line_id - 1].end
-            else if cursor_position == len(builder.buf) && current_line_id != 0 do ending_of_line = cursor_position - 1
+            else if cursor_position == len(builder.buf) && current_line_id != 0 {
+                ending_of_line = cursor_position - 1
+            }
             //NOTE: header_id as the y coord is only true for when all the headers are all 1 screen width long
             cursor_coords = {cursor_position - ending_of_line - 1, header_id}
         }
 
         {     //Render text
-            //TODO: Be able to scroll from top to bottom, such that the file can be bigger than the rendered screen
+            //TODO: Be able to scroll from top to bottom, such that the file can be bigger
+            //than the rendered screen
             for header, header_id in headers {
                 using header
                 str := strings.to_string(builder)
-                //TODO: Have the circle rendered depending on the indentation of the header (also different color as well)
+                color: rl.Color
+
+                switch indentation_level {
+                case 0:
+                    color = PURPLE
+                case 1:
+                    color = RED
+                case 2:
+                    color = GREEN
+                case:
+                    panic("hell on earth")
+                }
+
+                x_offset: i32 = auto_cast indentation_level * 15
+
                 DrawCircle(
-                    auto_cast text_measure.x / 2. + 2,
+                    auto_cast text_measure.x / 2. + 2 + x_offset,
                     auto_cast text_measure.y / 2 + auto_cast header_id * auto_cast (text_measure.y + 2),
                     text_measure.x / 3,
-                    PURPLE,
+                    color,
                 )
                 //TODO: Render text such that we have newlines, and at some point, some line-wrapping
                 DrawTextEx(
                     font,
                     fmt.ctprintf("%v", str),
-                    {text_measure.x + 4 + 2, 1 + (text_measure.y + 2) * auto_cast header_id},
+                    {text_measure.x + 4 + 2 + f32(x_offset), 1 + (text_measure.y + 2) * f32(header_id)},
                     20,
                     0,
                     WHITE,
                 )
             }
             //Cursor
+            //TODO: cursor will need to know the indentation level of the header it is on
             DrawRectangleV(
                 {
                     auto_cast (cursor_coords.x) * text_measure.x + text_measure.x + 4 + 2,

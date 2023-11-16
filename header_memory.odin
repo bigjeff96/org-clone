@@ -5,11 +5,6 @@ import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
 
-Node :: struct($T: typeid) {
-    value: ^T,
-    next:  ^Node(T),
-}
-
 Header_memory_manager :: struct {
     raw_headers: [dynamic]Header,
     free_list:   ^Node(Header),
