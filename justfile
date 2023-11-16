@@ -4,14 +4,14 @@ find := "/cygdrive/c/cygwin64/bin/find.exe"
 exe := "org-clone.exe"
 debug_exe := "org-clone-debug.exe"
 
-# cool stuff right here baby
 debug:
     odin build . -debug -show-timings -out:{{exe}}
     just move_exe
 
 watch:
     watchexec -e odin just debug_watch
-
+	
+#ignore
 debug_watch:
     #!/bin/sh
     odin build . -debug -out:{{exe}}
@@ -21,9 +21,10 @@ debug_watch:
 
 release:
     odin build . -o:speed -show-timings
-
+	
+#Line count of project
 tokei:
-	tokei
+	tokei -t Odin -o yaml
 
 format:
     #!/bin/sh
