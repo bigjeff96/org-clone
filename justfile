@@ -23,12 +23,12 @@ release:
     odin build . -o:speed -show-timings
 	
 #Line count of project
-tokei:
+loc:
 	tokei -t Odin -o yaml
 
-format:
+fmt:
     #!/bin/sh
-    for i in `{{ find }} . -name "*.odin" -type f`; do
+    for i in $({{ find }} . -name "*.odin" -type f); do
         odinfmt -w "$i"
     done             
 

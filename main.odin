@@ -1,21 +1,24 @@
 package orgclone
 
 import "core:fmt"
-import "core:strings"
-import "core:runtime"
 import "core:mem"
 import "core:mem/virtual"
-import "core:testing"
-import "core:slice"
 import "core:os"
-import rl "vendor:raylib"
-import mu "vendor:microui"
+import "core:runtime"
+import "core:slice"
+import "core:strings"
+import "core:testing"
 import mu_rl "microui_raylib"
+import mu "vendor:microui"
+import rl "vendor:raylib"
 import "vendor:stb/src"
 
 TICK_DURATION :: 15
 INDENTATION_AMOUNT :: 15
 HEADERS_ONE_LINE :: true
+FONT_SIZE :: 20
+
+TESTING :: true
 
 Line :: struct {
     start: int,
@@ -76,11 +79,23 @@ main :: proc() {
 
     ctx := mu_rl.raylib_cxt()
     editor: Editor
-    err := init_editor(&editor, 20)
+    err := init_editor(&editor, FONT_SIZE)
     if err != .None do panic("error in editor allocation")
     using editor
 
+    when TESTING {
+        for _ in 0 ..< 10 {
+            append(&headers, make_header(&header_memory_manager))
+        }
+        for i in 0 ..< len(headers) {
+            using header := headers[i]
+            strings.write_string(&header.builder, fmt.tprintf("Header %v\n", i))
+        }
+    }
+
     for !WindowShouldClose() {
+        defer free_all(context.temp_allocator)
+
         mu_rl.mu_input(ctx)
         BeginDrawing()
         defer EndDrawing()
@@ -88,7 +103,6 @@ main :: proc() {
         ClearBackground(BLACK)
         mu.begin(ctx)
         defer mu.end(ctx)
-
 
         key := rl.GetKeyPressed()
         {     // Update key and reset tick
@@ -178,7 +192,7 @@ main :: proc() {
             }
             //Cursor
             DrawRectangleV(
-                {
+                 {
                     auto_cast (cursor_coords.x) * text_measure.x +
                     text_measure.x +
                     4 +
@@ -198,28 +212,28 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
     switch {
 
     case key == .BACKSPACE && rl.IsKeyDown(.LEFT_CONTROL):
-	using header := headers[header_id]
-	using builder
-	//delete everything until the cursor meets whitespace
-	//TODO: add some checks on cursor_position to stop craches
+        using header := headers[header_id]
+        using builder
+        //delete everything until the cursor meets whitespace
+        //TODO: add some checks on cursor_position to stop craches
 
-	if cursor_position == 0 do break
-	if strings.is_space(auto_cast buf[cursor_position - 1]) {
-	    for strings.is_space(auto_cast buf[cursor_position - 1]) && len(buf) != 0 {
-		remove_back_byte_at(editor, cursor_position)
-		cursor_position -= 1
-		cursor_position = max(0, cursor_position)
-		if cursor_position == 0 do break
-	    }
-	} else {
-	    for !strings.is_space(auto_cast buf[cursor_position - 1]) && len(buf) != 0 {
-		remove_back_byte_at(editor, cursor_position)
-		cursor_position -= 1
-		cursor_position = max(0, cursor_position)
-		if cursor_position == 0 do break
-	    }
-	}
-	
+        if cursor_position == 0 do break
+        if strings.is_space(auto_cast buf[cursor_position - 1]) {
+            for strings.is_space(auto_cast buf[cursor_position - 1]) && len(buf) != 0 {
+                remove_back_byte_at(editor, cursor_position)
+                cursor_position -= 1
+                cursor_position = max(0, cursor_position)
+                if cursor_position == 0 do break
+            }
+        } else {
+            for !strings.is_space(auto_cast buf[cursor_position - 1]) && len(buf) != 0 {
+                remove_back_byte_at(editor, cursor_position)
+                cursor_position -= 1
+                cursor_position = max(0, cursor_position)
+                if cursor_position == 0 do break
+            }
+        }
+
     case key == .BACKSPACE:
         if len(headers[header_id].builder.buf) == 0 && header_id != 0 {
             delete_current_header(editor)
@@ -240,11 +254,16 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
         }
 
     case key == .ENTER:
-        //TODO: Have indentation be equal to the previous header's indentation
-        //TODO: if indentation > 0, it has a parent header, and this header is its child
         header_id += 1
         append(&headers, make_header(&header_memory_manager))
         cursor_position = 0
+
+        headers[header_id].indentation_level = headers[header_id - 1].indentation_level
+        headers[header_id].parent_header = headers[header_id - 1].parent_header
+
+        if headers[header_id].indentation_level > 0 {
+            append(&headers[header_id].parent_header.children_headers, headers[header_id])
+        }
 
     //TODO: have enter+shift to make a newline
 
@@ -253,16 +272,17 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
         using header := headers[header_id]
 
         if parent_header != nil {
-            //only one more than parent header
+            //TODO: only one more than previous header 
             indentation_level = min(parent_header.indentation_level + 1, indentation_level + 1)
         } else {
-            // previous header is the parent header now
-            //(nope, its the next header with en indentation that is one less than the current header)
-            //TODO: fix this
             if header_id > 0 {
-                parent_header = headers[header_id - 1]
-                indentation_level = parent_header.indentation_level + 1
-                //TODO: make it also a child of the parent header
+                indentation_level += 1
+                #reverse for prev_header, id in headers[:header_id] {
+                    if prev_header.indentation_level == indentation_level - 1 {
+                        parent_header = prev_header
+                        break
+                    }
+                }
                 append(&parent_header.children_headers, header)
             }
         }
@@ -278,9 +298,8 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
 
     case rl.IsKeyDown(.LEFT_ALT) && key == .LEFT:
         using header := headers[header_id]
-
         if parent_header != nil {
-            indentation_level = max(0, parent_header.indentation_level - 1)
+            indentation_level = max(0, indentation_level - 1)
 
             //remove it from parents header children list
             id_child_list := 0
@@ -290,8 +309,10 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             }
             unordered_remove(&parent_header.children_headers, id_child_list)
 
-            //for now, only one level of indentation
-            parent_header = nil
+            defer {
+                parent_header = parent_header.parent_header
+                if parent_header != nil do append(&parent_header.children_headers, header)
+            }
 
             //unindent children
             unindent_children :: proc(children_headers: []^Header) {
@@ -303,9 +324,18 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             }
             unindent_children(children_headers[:])
 
-            //how do I position the new header in the main list now?
+            if parent_header == nil do panic("nil parent header")
 
-            // now this header will be the child of a new header
+            last_child_header := slice.last(parent_header.children_headers[:])
+
+            last_child_id, ok := slice.linear_search(headers[:], last_child_header)
+
+            if !ok do fmt.panicf("something is very wrong here at %v")
+
+            inject_at(&headers, last_child_id + 1, header)
+            ordered_remove(&headers, header_id)
+            //NOTE: since we do an ordered remove, it cancels out the +1 from the injection
+            header_id = last_child_id
         }
 
     // When we unindent a header, that header will no longer be a child header

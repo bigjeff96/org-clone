@@ -1,10 +1,10 @@
 package micro_ui_raylib
 
 import "core:fmt"
-import "core:unicode/utf8"
 import "core:strings"
-import rl "vendor:raylib"
+import "core:unicode/utf8"
 import mu "vendor:microui"
+import rl "vendor:raylib"
 
 FONT_SIZE_MU :: 25
 ui_state := struct {
@@ -108,10 +108,17 @@ mu_keyboard_input :: proc(ctx: ^mu.Context) {
     keys_to_check := [?]struct {
         rl_key: rl.KeyboardKey,
         mu_key: mu.Key,
-    }{{
-            .LEFT_SHIFT,
-            .SHIFT,
-        }, {.RIGHT_SHIFT, .SHIFT}, {.LEFT_CONTROL, .CTRL}, {.RIGHT_CONTROL, .CTRL}, {.LEFT_ALT, .ALT}, {.RIGHT_ALT, .ALT}, {.ENTER, .RETURN}, {.KP_ENTER, .RETURN}, {.BACKSPACE, .BACKSPACE}}
+    } {
+        {.LEFT_SHIFT, .SHIFT},
+        {.RIGHT_SHIFT, .SHIFT},
+        {.LEFT_CONTROL, .CTRL},
+        {.RIGHT_CONTROL, .CTRL},
+        {.LEFT_ALT, .ALT},
+        {.RIGHT_ALT, .ALT},
+        {.ENTER, .RETURN},
+        {.KP_ENTER, .RETURN},
+        {.BACKSPACE, .BACKSPACE},
+    }
 
     for key in keys_to_check {
         if rl.IsKeyPressed(key.rl_key) {
