@@ -1,4 +1,5 @@
 * TODO Fix the logic for the determination of when headers change indentation
+** DONE make a debug print of the header tree
 * TODO Be able to move Headers up and down
 * TODO toggle todo/done on headers
 * TODO Fold Headers

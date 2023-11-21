@@ -234,6 +234,10 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             }
         }
 
+    case key == .P && rl.IsKeyDown(.LEFT_CONTROL):
+        fmt.printf("----------\n")
+        print_tree_hierarchy(headers[:])
+
     case key == .BACKSPACE:
         if len(headers[header_id].builder.buf) == 0 && header_id != 0 {
             delete_current_header(editor)
@@ -307,7 +311,7 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             for &child, id in parent_header.children_headers {
                 if child == header do id_child_list = id
             }
-            unordered_remove(&parent_header.children_headers, id_child_list)
+            ordered_remove(&parent_header.children_headers, id_child_list)
 
             defer {
                 parent_header = parent_header.parent_header
@@ -324,6 +328,7 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             }
             unindent_children(children_headers[:])
 
+	    //TODO: Check if the error in the indentation is here or not
             if parent_header == nil do panic("nil parent header")
 
             last_child_header := slice.last(parent_header.children_headers[:])
@@ -621,4 +626,31 @@ determine_printable_byte :: proc(key: rl.KeyboardKey) -> (byte_to_write: byte) {
     }
 
     return
+}
+
+print_tree_hierarchy :: proc(headers: []^Header) {
+    context.allocator = context.temp_allocator
+    visited_headers := make(map[^Header]bool)
+
+    //TODO: put an id to know who is the parent header
+    //NOTE: what we have right now does not work because the recursion fucks it up
+    print_tree_hierarchy :: proc(
+        headers: []^Header,
+        visited_headers: ^map[^Header]bool,
+        indentation_level: int,
+        parent_id: int,
+    ) {
+        for header, id in headers {
+            using header
+            visited := header in visited_headers
+            if !visited {
+                visited_headers[header] = true
+                for _ in 0 ..< indentation_level do fmt.printf("  ")
+                if parent_id != 0 do fmt.printf("%v: ", parent_id - 1)
+                fmt.printf("%v\n", strings.to_string(builder))
+                print_tree_hierarchy(children_headers[:], visited_headers, indentation_level + 1, id + 1)
+            } else do continue
+        }
+    }
+    print_tree_hierarchy(headers[:], &visited_headers, 0, 0)
 }
