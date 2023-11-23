@@ -37,6 +37,9 @@ Editor :: struct {
     header_memory_manager: Header_memory_manager,
 }
 
+//TODO: each header should know its position in the header list
+// maybe in the editor struct, we have a hash map of header_id -> ^header
+// at the end of each event loop, we update the hash map if needed
 Header :: struct {
     work_state:        enum {
         none,
@@ -161,15 +164,15 @@ main :: proc() {
                 str := strings.to_string(builder)
                 color: rl.Color
 
-                switch indentation_level {
+                switch indentation_level % 4 {
                 case 0:
                     color = PURPLE
                 case 1:
                     color = RED
                 case 2:
                     color = GREEN
-                case:
-                    panic("hell on earth")
+                case 3:
+                    color = BLUE
                 }
 
                 x_offset: i32 = auto_cast indentation_level * INDENTATION_AMOUNT
@@ -258,6 +261,7 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
         }
 
     case key == .ENTER:
+        //TODO: be able to make headers in the middle of the header list, not just appending
         header_id += 1
         append(&headers, make_header(&header_memory_manager))
         cursor_position = 0
@@ -328,19 +332,25 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
             }
             unindent_children(children_headers[:])
 
-	    //TODO: Check if the error in the indentation is here or not
+            //TODO: Check if the error in the indentation is here or not
             if parent_header == nil do panic("nil parent header")
 
-            last_child_header := slice.last(parent_header.children_headers[:])
+            if len(parent_header.children_headers) != 0 {
+                last_child_header := slice.last(parent_header.children_headers[:])
 
-            last_child_id, ok := slice.linear_search(headers[:], last_child_header)
+                max_child_id := -1
 
-            if !ok do fmt.panicf("something is very wrong here at %v")
+                for child in parent_header.children_headers {
+                    child_id, ok := slice.linear_search(headers[:], child)
+                    if !ok do panic("child not found")
+                    max_child_id = max(max_child_id, child_id)
+                }
 
-            inject_at(&headers, last_child_id + 1, header)
-            ordered_remove(&headers, header_id)
-            //NOTE: since we do an ordered remove, it cancels out the +1 from the injection
-            header_id = last_child_id
+                inject_at(&headers, max_child_id + 1, header)
+                ordered_remove(&headers, header_id)
+                //NOTE: since we do an ordered remove, it cancels out the +1 from the injection
+                header_id = max_child_id
+            }
         }
 
     // When we unindent a header, that header will no longer be a child header
@@ -633,24 +643,30 @@ print_tree_hierarchy :: proc(headers: []^Header) {
     visited_headers := make(map[^Header]bool)
 
     //TODO: put an id to know who is the parent header
-    //NOTE: what we have right now does not work because the recursion fucks it up
     print_tree_hierarchy :: proc(
         headers: []^Header,
         visited_headers: ^map[^Header]bool,
         indentation_level: int,
-        parent_id: int,
+        parent_text: string,
     ) {
         for header, id in headers {
             using header
             visited := header in visited_headers
             if !visited {
                 visited_headers[header] = true
+		//TODO: the printing is not really working here, FIXME
                 for _ in 0 ..< indentation_level do fmt.printf("  ")
-                if parent_id != 0 do fmt.printf("%v: ", parent_id - 1)
+                if parent_text != "" do fmt.printf("%s ", parent_text)
+                else do fmt.printf("parent is nil: ")
                 fmt.printf("%v\n", strings.to_string(builder))
-                print_tree_hierarchy(children_headers[:], visited_headers, indentation_level + 1, id + 1)
+                print_tree_hierarchy(
+                    children_headers[:],
+                    visited_headers,
+                    indentation_level + 1,
+                    strings.to_string(builder),
+                )
             } else do continue
         }
     }
-    print_tree_hierarchy(headers[:], &visited_headers, 0, 0)
+    print_tree_hierarchy(headers[:], &visited_headers, 0, "")
 }
