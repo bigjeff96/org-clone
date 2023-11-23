@@ -239,7 +239,7 @@ execute_command :: proc(using editor: ^Editor, key: rl.KeyboardKey) {
 
     case key == .P && rl.IsKeyDown(.LEFT_CONTROL):
         fmt.printf("----------\n")
-        print_tree_hierarchy(headers[:])
+        print_tree_hierarchy_hihi(headers[:])
 
     case key == .BACKSPACE:
         if len(headers[header_id].builder.buf) == 0 && header_id != 0 {
@@ -638,7 +638,7 @@ determine_printable_byte :: proc(key: rl.KeyboardKey) -> (byte_to_write: byte) {
     return
 }
 
-print_tree_hierarchy :: proc(headers: []^Header) {
+print_tree_hierarchy_hihi :: proc(headers: []^Header) {
     context.allocator = context.temp_allocator
     visited_headers := make(map[^Header]bool)
 
