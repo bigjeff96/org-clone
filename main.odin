@@ -670,3 +670,5 @@ print_tree_hierarchy_hihi :: proc(headers: []^Header) {
     }
     print_tree_hierarchy(headers[:], &visited_headers, 0, "")
 }
+
+//TODO: make the same func print_tree_hierarchy but with without recursion
